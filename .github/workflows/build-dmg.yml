@@ -99,6 +99,54 @@ jobs:
           echo "---- SeriesDetailView.swift lines 85-150 ----"
           sed -n '85,150p' Lume/Views/Series/SeriesDetailView.swift || true
 
+      - name: Patch SeriesDetailView (split heavy closure so the compiler can type-check it)
+        run: |
+          cat > /tmp/patch.py <<'PY'
+          import re, sys
+          path = "Lume/Views/Series/SeriesDetailView.swift"
+          lines = open(path, encoding="utf-8").read().split("\n")
+          head = "\n".join(lines[:84])
+          tail = "\n".join(lines[84:])
+
+          pattern = re.compile(
+              r"\.task\(id: series\.id\) \{[ \t]*\n"
+              r"(?P<body>.*?)"
+              r"\n[ \t]*withAnimation\(\.easeInOut\(duration: 0\.3\)\) \{[ \t]*\n"
+              r"[ \t]*isLoadingTMDB = false[ \t]*\n"
+              r"[ \t]*\}[ \t]*\n"
+              r"[ \t]*\}",
+              re.DOTALL,
+          )
+          m = pattern.search(tail)
+          if not m:
+              print("PATCH FAILED: could not find the .task block", file=sys.stderr)
+              sys.exit(1)
+
+          body_lines = [l.strip() for l in m.group("body").split("\n") if l.strip()]
+          method = "    private func runInitialLoad() async {\n"
+          for l in body_lines:
+              method += "        " + l + "\n"
+          method += "        withAnimation(Animation.easeInOut(duration: 0.3)) {\n"
+          method += "            isLoadingTMDB = false\n"
+          method += "        }\n"
+          method += "    }\n\n"
+
+          tail = tail[:m.start()] + ".task(id: series.id) { await runInitialLoad() }" + tail[m.end():]
+
+          marker = "    // MARK: - Loading"
+          if marker not in tail:
+              print("PATCH FAILED: marker not found", file=sys.stderr)
+              sys.exit(1)
+          tail = tail.replace(marker, method + marker, 1)
+
+          open(path, "w", encoding="utf-8").write(head + "\n" + tail)
+          print("Patched OK. New method:")
+          print(method)
+          PY
+          python3 /tmp/patch.py
+          echo "---- patched region ----"
+          sed -n '85,125p' Lume/Views/Series/SeriesDetailView.swift
+
       - name: Build macOS app (unsigned)
         run: |
           set -o pipefail
