@@ -7,6 +7,10 @@ on:
         description: "Xcode scheme to build (leave blank to auto-detect)"
         required: false
         default: ""
+      lume_ref:
+        description: "Lume tag to build (blank = v3.2.0)"
+        required: false
+        default: ""
       recorder_ref:
         description: "LumeRecorder tag/branch (blank = default branch)"
         required: false
@@ -25,7 +29,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: bilipp/Lume
-          ref: v3.2.0
+          ref: ${{ github.event.inputs.lume_ref || 'v3.2.0' }}
 
       - name: Clone sibling dependencies (LumeRecorder, LumeEngine)
         env:
@@ -33,12 +37,15 @@ jobs:
         run: |
           set -e
           cd "$GITHUB_WORKSPACE/.."
-          for pair in "LumeRecorder:${{ github.event.inputs.recorder_ref }}" "LumeEngine:${{ github.event.inputs.engine_ref }}"; do
+          for pair in "LumeRecorder:${{ github.event.inputs.recorder_ref }}" "LumeEngine:${{ github.event.inputs.engine_ref }}" "LumeCloud:"; do
             name="${pair%%:*}"
             ref="${pair#*:}"
-            git clone "https://github.com/bilipp/$name.git" "$name"
-            if [ -n "$ref" ]; then git -C "$name" checkout "$ref"; fi
-            echo "== $name at $(git -C "$name" describe --tags --always)"
+            if git clone "https://github.com/bilipp/$name.git" "$name"; then
+              if [ -n "$ref" ]; then git -C "$name" checkout "$ref"; fi
+              echo "== $name at $(git -C "$name" describe --tags --always)"
+            else
+              echo "::warning::Could not clone bilipp/$name (private or does not exist)"
+            fi
           done
           ls -la "$GITHUB_WORKSPACE/.."
           ls "LumeRecorder" || true
