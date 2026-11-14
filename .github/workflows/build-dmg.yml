@@ -7,6 +7,10 @@ on:
         description: "Xcode scheme to build (leave blank to auto-detect)"
         required: false
         default: ""
+      arch:
+        description: "Architecture: x86_64 (Intel) or 'arm64 x86_64' (universal)"
+        required: false
+        default: "x86_64"
       swift_opt:
         description: "Swift optimization level (blank = project default; use -Onone to avoid the compiler crash)"
         required: false
@@ -215,13 +219,14 @@ jobs:
           if [ -n "${{ github.event.inputs.swift_opt }}" ]; then
             EXTRA+=("SWIFT_OPTIMIZATION_LEVEL=${{ github.event.inputs.swift_opt }}")
           fi
+          EXTRA+=("ARCHS=${{ github.event.inputs.arch || 'x86_64' }}" "ONLY_ACTIVE_ARCH=NO")
           echo "Extra build settings: ${EXTRA[*]}"
           xcodebuild build \
             "${EXTRA[@]}" \
             ${{ steps.find.outputs.container }} \
             -scheme "${{ steps.find.outputs.scheme }}" \
             -configuration Release \
-            -destination 'platform=macOS' \
+            -destination 'generic/platform=macOS' \
             -derivedDataPath build \
             -skipPackagePluginValidation \
             -skipMacroValidation \
@@ -257,6 +262,8 @@ jobs:
             echo "No .app found in build output"; exit 1
           fi
           echo "Found app: $APP"
+          echo "Architectures in app binary:"
+          for f in "$APP"/Contents/MacOS/*; do echo "$f: $(lipo -archs "$f" 2>&1)"; done
           # Ad-hoc sign so it launches on Apple Silicon after the Gatekeeper override
           codesign --force --deep --sign - "$APP" || true
 
