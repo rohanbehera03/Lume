@@ -7,6 +7,10 @@ on:
         description: "Xcode scheme to build (leave blank to auto-detect)"
         required: false
         default: ""
+      swift_opt:
+        description: "Swift optimization level (blank = project default; use -Onone to avoid the compiler crash)"
+        required: false
+        default: "-Onone"
       xcode_app:
         description: "Xcode app to use, e.g. Xcode_26.4.app (blank = runner default)"
         required: false
@@ -207,7 +211,13 @@ jobs:
       - name: Build macOS app (unsigned)
         run: |
           set -o pipefail
+          EXTRA=()
+          if [ -n "${{ github.event.inputs.swift_opt }}" ]; then
+            EXTRA+=("SWIFT_OPTIMIZATION_LEVEL=${{ github.event.inputs.swift_opt }}")
+          fi
+          echo "Extra build settings: ${EXTRA[*]}"
           xcodebuild build \
+            "${EXTRA[@]}" \
             ${{ steps.find.outputs.container }} \
             -scheme "${{ steps.find.outputs.scheme }}" \
             -configuration Release \
@@ -221,13 +231,17 @@ jobs:
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            | tee build.log | tail -n 40
+            2>&1 | tee build.log | tail -n 40
 
       - name: Show errors only
         if: failure()
         run: |
+          echo "==== log size ===="
+          wc -l build.log || echo "build.log missing (an earlier step failed before the build ran)"
           echo "==== error lines ===="
-          grep -n -E "error:|Undefined symbols|ld: |fatal error|\*\* BUILD FAILED" build.log | grep -v "warning:" | head -60 || true
+          grep -n -E " error:|error: |Undefined symbols|^ld: |fatal error|BUILD FAILED|Command .* failed|Could not resolve|The following build commands failed" build.log | grep -v "warning:" | head -60 || true
+          echo "==== last 60 lines of build.log ===="
+          tail -n 60 build.log | cut -c1-300 || true
           echo "==== context around first error ===="
           first=$(grep -n "error:" build.log | head -1 | cut -d: -f1)
           if [ -n "$first" ]; then
