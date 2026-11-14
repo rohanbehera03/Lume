@@ -94,6 +94,11 @@ jobs:
           echo "Using scheme: $SCHEME"
           echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
 
+      - name: Print code near the known compiler timeout
+        run: |
+          echo "---- SeriesDetailView.swift lines 85-150 ----"
+          sed -n '85,150p' Lume/Views/Series/SeriesDetailView.swift || true
+
       - name: Build macOS app (unsigned)
         run: |
           set -o pipefail
@@ -105,7 +110,6 @@ jobs:
             -derivedDataPath build \
             -skipPackagePluginValidation \
             -skipMacroValidation \
-            OTHER_SWIFT_FLAGS='$(inherited) -Xfrontend -solver-expression-time-threshold=3000 -Xfrontend -solver-memory-threshold -Xfrontend 4000000000' \
             CLANG_ENABLE_CODE_COVERAGE=NO \
             CLANG_COVERAGE_MAPPING=NO \
             SWIFT_COMPILATION_MODE=wholemodule \
