@@ -219,7 +219,7 @@ jobs:
           if [ -n "${{ github.event.inputs.swift_opt }}" ]; then
             EXTRA+=("SWIFT_OPTIMIZATION_LEVEL=${{ github.event.inputs.swift_opt }}")
           fi
-          EXTRA+=("ARCHS=${{ github.event.inputs.arch || 'x86_64' }}" "ONLY_ACTIVE_ARCH=NO")
+          EXTRA+=("ARCHS=${{ github.event.inputs.arch || 'x86_64' }}" "ONLY_ACTIVE_ARCH=NO" "MACOSX_DEPLOYMENT_TARGET=15.0" "VALIDATE_PRODUCT=NO")
           echo "Extra build settings: ${EXTRA[*]}"
           xcodebuild build \
             "${EXTRA[@]}" \
@@ -262,8 +262,63 @@ jobs:
             echo "No .app found in build output"; exit 1
           fi
           echo "Found app: $APP"
+
+          echo "Structure of Libavformat.framework (diagnostic):"
+          ls -laR "$APP/Contents/Frameworks/Libavformat.framework" 2>/dev/null | head -40 || true
+
+          echo "Adding a minimal Info.plist to embedded frameworks that lack one:"
+          for fw in "$APP"/Contents/Frameworks/*.framework; do
+            [ -d "$fw" ] || continue
+            name=$(basename "$fw" .framework)
+            if [ -d "$fw/Versions/A" ]; then
+              [ -e "$fw/Versions/Current" ] || ln -sfn A "$fw/Versions/Current"
+              plist_dir="$fw/Versions/A/Resources"
+            else
+              plist_dir="$fw"
+            fi
+            if [ ! -f "$plist_dir/Info.plist" ] && [ ! -f "$fw/Resources/Info.plist" ]; then
+              echo "  adding Info.plist to $name"
+              mkdir -p "$plist_dir"
+              printf '%s\n' \
+                '<?xml version="1.0" encoding="UTF-8"?>' \
+                '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+                '<plist version="1.0"><dict>' \
+                "<key>CFBundleExecutable</key><string>$name</string>" \
+                "<key>CFBundleIdentifier</key><string>com.local.$name</string>" \
+                "<key>CFBundleName</key><string>$name</string>" \
+                '<key>CFBundlePackageType</key><string>FMWK</string>' \
+                '<key>CFBundleShortVersionString</key><string>1.0</string>' \
+                '<key>CFBundleVersion</key><string>1</string>' \
+                '</dict></plist>' > "$plist_dir/Info.plist"
+              if [ -d "$fw/Versions/A" ] && [ ! -e "$fw/Resources" ]; then
+                ln -sfn Versions/Current/Resources "$fw/Resources"
+              fi
+            fi
+          done
           echo "Architectures in app binary:"
           for f in "$APP"/Contents/MacOS/*; do echo "$f: $(lipo -archs "$f" 2>&1)"; done
+
+          echo "Minimum macOS version required (want 15.0 or lower):"
+          minos_of() { vtool -show-build "$1" 2>/dev/null | awk '/minos/ {print $2}' | sort -V | tail -1; }
+          too_new() { [ "$(printf '%s\n15.0\n' "$1" | sort -V | tail -1)" != "15.0" ]; }
+          main_bad=0
+          for f in "$APP"/Contents/MacOS/*; do
+            m=$(minos_of "$f")
+            echo "  main binary: ${m:-unknown}  $f"
+            if [ -n "$m" ] && too_new "$m"; then main_bad=1; fi
+          done
+          find "$APP/Contents/Frameworks" -type f 2>/dev/null | while read -r f; do
+            if file "$f" | grep -q "Mach-O"; then
+              m=$(minos_of "$f")
+              if [ -n "$m" ]; then
+                echo "  ${m}  ${f#$APP/}"
+                if too_new "$m"; then echo "::warning::requires macOS $m: ${f#$APP/}"; fi
+              fi
+            fi
+          done
+          if [ "$main_bad" = "1" ]; then
+            echo "::error::Main app binary requires newer than macOS 15.0"; exit 1
+          fi
           # Ad-hoc sign so it launches on Apple Silicon after the Gatekeeper override
           codesign --force --deep --sign - "$APP" || true
 
