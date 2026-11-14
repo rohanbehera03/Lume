@@ -7,6 +7,14 @@ on:
         description: "Xcode scheme to build (leave blank to auto-detect)"
         required: false
         default: ""
+      recorder_ref:
+        description: "LumeRecorder tag/branch (blank = default branch)"
+        required: false
+        default: ""
+      engine_ref:
+        description: "LumeEngine tag/branch (blank = default branch)"
+        required: false
+        default: ""
 
 jobs:
   build:
@@ -18,6 +26,22 @@ jobs:
         with:
           repository: bilipp/Lume
           ref: v3.2.0
+
+      - name: Clone sibling dependencies (LumeRecorder, LumeEngine)
+        env:
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -e
+          cd "$GITHUB_WORKSPACE/.."
+          for pair in "LumeRecorder:${{ github.event.inputs.recorder_ref }}" "LumeEngine:${{ github.event.inputs.engine_ref }}"; do
+            name="${pair%%:*}"
+            ref="${pair#*:}"
+            git clone "https://github.com/bilipp/$name.git" "$name"
+            if [ -n "$ref" ]; then git -C "$name" checkout "$ref"; fi
+            echo "== $name at $(git -C "$name" describe --tags --always)"
+          done
+          ls -la "$GITHUB_WORKSPACE/.."
+          ls "LumeRecorder" || true
 
       - name: Show Xcode version
         run: xcodebuild -version
